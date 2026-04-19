@@ -5,366 +5,323 @@ from rapidfuzz import fuzz
 # =========================
 # LOAD
 # =========================
-df_old = pd.read_excel("c:/Thesis/Ex-factory & UN sales per month_Melany.xlsx")
-df_new = pd.read_excel("C:/Thesis/MKT_RETAIL 2024-2025 MTH.xlsx")  
+df_mkt = pd.read_excel("c:/Thesis/DATASET_FINALE.xlsx")
+import pandas as pd
+import re
 
-# =========================
-# CLEAN BASE
-# =========================
-def clean_df(df):
-
-    df.columns = (
-        df.columns
-        .str.replace("\n", " ", regex=False)
-        .str.strip()
-        .str.lower()
-    )
-    print(df.columns)
-    rename_dict = {}
-    cols_to_drop = []
-    for col in df.columns:
-        if "single/combined molecule old" in col:
-            cols_to_drop.append(col)
-        elif "single" in col and "molecule" in col and "old" not in col :
-            rename_dict[col] = "single_combined_molecule"
-        elif "product launch" in col:
-            rename_dict[col] = "product_launch_date"
-        elif "pack launch" in col:
-            rename_dict[col] = "pack_launch_date"
-        elif "frm2" in col:
-            rename_dict[col] = "frm2"
-        elif "nfc123" in col:
-            rename_dict[col] = "nfc123"
-        elif col == "cls" or "rimborso" in col:
-            rename_dict[col] = "reimbursement_class"
-
-    df = df.rename(columns=rename_dict)
-    df = df.drop(columns= cols_to_drop, errors= "ignore")
-    print(df.columns.tolist())
-
-    if "reimbursement_class" not in df.columns:
-        df["reimbursement_class"] = None   
-
-    df["reimbursement_class"] = (
-        df["reimbursement_class"]
-        .astype(str)
-        .str.replace("*", "", regex=False)
-        .str.strip()
-        .str.lower()
-    )
-
-    mapping = {
-        "farmaci automedic": "classe c",
-        "sop": "classe c",
-        "otc": "classe c",
-        "otc s/registraz": "classe c",
-        "farmaci sop": "classe c",
-        "farmaci s.p.": "classe c",
-        "limt px reg ussl-a": "classe a",
-        "a": "classe a",
-        "c": "classe c"
-    }  
-
-    df["reimbursement_class"] = df["reimbursement_class"].replace(mapping)
-
-    def clean_text(x):
-        if pd.isna(x):
-            return None
-        return str(x).lower().strip()
-
-    for col in ["product", "pack", "manufacturer"]:
-        if col in df.columns:
-            df[col] = df[col].apply(clean_text)
-
-    return df
-
-df_old = clean_df(df_old)
-df_new = clean_df(df_new)
-
-# =========================
-# PACK RAW
-# =========================
-df_old["pack_raw"] = df_old["pack"]
-df_new["pack_raw"] = df_new["pack"]
-
-# =========================
-# CLEAN MANUFACTURER
-# =========================
-def clean_manufacturer(x):
-    if pd.isna(x):
-        return None
-    x = str(x).lower().strip()
-    x = re.sub(r"\b(spa|srl|ltd|gmbh|inc|sa)\b", "", x)
-    x = re.sub(r"\s+", " ", x)
-    return x.strip()
-
-df_old["manufacturer"] = df_old["manufacturer"].apply(clean_manufacturer)
-df_new["manufacturer"] = df_new["manufacturer"].apply(clean_manufacturer)
-
-# =========================
-# CLEAN PACK
-# =========================
-def clean_pack(x):
-    if pd.isna(x):
-        return None
-    x = str(x).lower()
-    x = re.sub(r"[.,]", "", x)
-    x = re.sub(r"\b(compr|cpr|compresse|riv\w*)\b", "cpr", x)
-    x = re.sub(r"\b(capsule|caps)\b", "caps", x)
-    x = re.sub(r"[x×]", "x", x)
-    x = re.sub(r"\s+", " ", x)
-    return x.strip()
-
-df_old["pack"] = df_old["pack"].apply(clean_pack)
-df_new["pack"] = df_new["pack"].apply(clean_pack)
-
-# =========================
-# df_new → LONG → PIVOT
-# =========================
-year_cols = [col for col in df_new.columns if re.search(r"\d{1,2}/\d{4}", str(col))]
-
-df_long = df_new.melt(
-    id_vars=[
-        "atc4","product","pack","pack_raw","manufacturer",
-        "reimbursement_class","metric",
-        "single_combined_molecule",
-        "protection"
-    ],
-    value_vars=year_cols,
-    var_name="date",
-    value_name="value"
-)
-
-df_long = df_long[df_long["metric"].str.contains("sell", case=False, na=False)]
-df_long = df_long[~df_long["metric"].str.contains("usd", case=False, na=False)]
-
-df_long["metric_type"] = df_long["metric"].str.lower().apply(
-    lambda x: "units" if re.search(r"\bun\b", x)
-    else ("eur" if re.search(r"\beur\b", x) else None)
-)
-
-df_long = df_long[df_long["metric_type"].notna()]
-
-df_long["date"] = pd.to_datetime(df_long["date"], format="%m/%Y", errors="coerce")
-df_long["year_month"] = df_long["date"].dt.to_period("M")
-
-df_long["new_col"] = "sellin_" + df_long["metric_type"] + "_" + df_long["year_month"].astype(str)
-
-df_new_clean = df_long.pivot_table(
-    index=[
-        "atc4","product","pack_raw","manufacturer",
-        "reimbursement_class","single_combined_molecule",
-        "protection"
-    ],
-    columns="new_col",
-    values="value",
-    aggfunc="sum"
-).reset_index()
-
-# =========================
-# df_old → rename colonne
-# =========================
-new_cols_old = {}
-
-for col in df_old.columns:
-    c = col.lower()
-    date_match = re.search(r"(\d{1,2}/\d{4})", c)
-
-    if date_match:
-        date = pd.to_datetime(date_match.group(1), format="%m/%Y")
-        ym = date.to_period("M")
-
-        if "sell-in" in c and "eur" not in c:
-            new_cols_old[col] = f"sellin_units_{ym}"
-        elif "eur" in c:
-            new_cols_old[col] = f"sellin_eur_{ym}"
-
-df_old = df_old.rename(columns=new_cols_old)
-
-# =========================
-# CREATE KEY
-# =========================
-def create_key(df):
-    return (
-        df["product"].fillna("") + "_" +
-        df["pack_raw"].fillna("") + "_" +
-        df["manufacturer"].fillna("") + "_" +
-        df["reimbursement_class"].fillna("")
-    )
-
-df_old["key"] = create_key(df_old)
-df_new_clean["key"] = create_key(df_new_clean)
-
-
-# =========================
-# MERGE
-# =========================
-df2 = df_old.merge(
-    df_new_clean,
-    on="key",
-    how="outer",
-    suffixes=("_old","_new")
-)
-
-# =========================
-# RICOSTRUZIONE COLONNE
-# =========================
-df2["atc4"] = df2.get("atc4_old").combine_first(df2.get("atc4_new"))
-df2["product"] = df2.get("product_old").combine_first(df2.get("product_new"))
-df2["pack_raw"] = df2.get("pack_raw_old").combine_first(df2.get("pack_raw_new"))
-df2["manufacturer"] = df2.get("manufacturer_old").combine_first(df2.get("manufacturer_new"))
-df2["reimbursement_class"] = df2.get("reimbursement_class_old").combine_first(df2.get("reimbursement_class_new"))
-df2["single_combined_molecule"] = df2.get("single_combined_molecule_old").combine_first(df2.get("single_combined_molecule_new"))
-
-# =========================
-# PRICE CALCULATION
-# =========================
-units_cols = [c for c in df2.columns if c.startswith("sellin_units_")]
-eur_cols   = [c for c in df2.columns if c.startswith("sellin_eur_")]
-
-def extract_date(col):
-    match = re.search(r"(\d{4}-\d{2})", col)
-    return match.group(1) if match else ""
-
-price_cols = []
-
-for u_col in units_cols:
-    month = u_col.replace("sellin_units_", "")
-    e_col = f"sellin_eur_{month}"
-
-    if e_col in df2.columns:
-        p_col = f"price_{month}"
-        df2[p_col] = df2[e_col] / df2[u_col]
-        df2[p_col] = df2[p_col].replace([float("inf"), -float("inf")], None)
-        df2[p_col] = df2[p_col].round(2)
-        price_cols.append(p_col)
-
-# =========================
-# ORDER COLUMNS
-# =========================
-months = sorted(set([extract_date(c) for c in units_cols]))
-
-ordered_cols = []
-for m in months:
-    u = f"sellin_units_{m}"
-    e = f"sellin_eur_{m}"
-    p = f"price_{m}"
-
-    if u in df2.columns:
-        ordered_cols.append(u)
-    if e in df2.columns:
-        ordered_cols.append(e)
-    if p in df2.columns:
-        ordered_cols.append(p)
-# -------------------------
-#  ATTESO VS OTTENUTO
-# -------------------------
-key_cols = ["product","pack_raw","manufacturer","reimbursement_class"]
-old_keys = set(df_old[key_cols].drop_duplicates().apply(tuple, axis=1))
-new_keys = set(df_new_clean[key_cols].drop_duplicates().apply(tuple, axis=1))
-final_keys = set(df2[key_cols].drop_duplicates().apply(tuple, axis=1))
-
-n_old = df_old[key_cols].drop_duplicates().shape[0]
-n_new = df_new_clean[key_cols].drop_duplicates().shape[0]
-n_final = df2[key_cols].drop_duplicates().shape[0]
-expected_total = len(old_keys | new_keys)
-
-
-print("\n=== CONTROLLO FINALE ===")
-print(f"Attesi (union): {expected_total}")
-print(f"Finale:         {n_final}")
-
-if n_final == expected_total:
-    print("✅ DATASET COMPLETO (nessuna perdita)")
-else:
-    print("❌ ATTENZIONE: mancano prodotti")
-
-# -------------------------
-#  IDENTIFICA PRODOTTI PERSI
-# -------------------------
-missing_products = (old_keys | new_keys) - final_keys
-
-print("\nProdotti mancanti:", len(missing_products))
-
-# =========================
-# FINAL DATASET
-# =========================
-base_cols = ["atc4","product","single_combined_molecule","pack_raw","manufacturer","reimbursement_class",
-        "product_launch_date","pack_launch_date","frm2","nfc123","protection"]
-
-df_final = df2[base_cols + ordered_cols].copy()
-
-# =========================
-# SAVE
-# =========================
-df_final.to_excel("c:/Thesis/final_dataset_monthly_FINAL.xlsx", index=False)
-
-print("\n✅ FILE FINALE CREATO PERFETTAMENTE!")
-# =========================
-# LOAD FILE ESTERNI
-# =========================
-df_dash = pd.read_excel("c:/Thesis/dashboard_2.xlsx")
-df_inn  = pd.read_excel("c:/Thesis/INN-BRAND.xlsx")
-
-df_inn= df_inn.rename(columns={"Product": "product", "Business Rule": "business_rule"})
-
-# =========================
-# CLEAN COLONNE
-# =========================
-df_dash.columns = df_dash.columns.str.lower().str.strip().str.replace(r"[^a-z0-9]", "_", regex= True)
-df_inn.columns  = df_inn.columns.str.lower().str.strip()
-
-print(df_dash.columns.tolist())
-
-# =========================
-# NORMALIZZAZIONE PRODUCT
-# =========================
-
-def normalize_product(x):
+# =====================================
+# 1. CREA IL MERCATO
+# mercato = molecule_adj_name + frm2
+# =====================================
+def clean_market_text(x):
     if pd.isna(x):
         return ""
-    x = str(x).lower().strip()
-    x = re.sub(r"[^a-z0-9 ]", " ", x)
+    x = str(x).strip().lower()
     x = re.sub(r"\s+", " ", x)
-    return x.strip()
+    return x
 
-# applica a tutti
-df_final["product_key"] = df_final["product"].apply(normalize_product)
-df_dash["product_key"]  = df_dash["product"].apply(normalize_product)
-df_inn["product_key"]   = df_inn["product"].apply(normalize_product)
+df_mkt["molecule_adj_clean"] = df_mkt["molecule_adj_name"].apply(clean_market_text)
+df_mkt["frm2_clean"] = df_mkt["frm2"].apply(clean_market_text)
 
-print(df_dash.columns.tolist())
-
-# =========================
-# MERGE 1 → DASHBOARD
-# =========================
-df_merged = df_final.merge( df_dash[["product_key", "competitor", "sing_comb_act_ing_s_", "gx_market__iqvia_", "gx_market__sdz_","molecule_adj__name", "molecule_list_name"]],
-    on="product_key",
-    how="left"
+df_mkt["market_id"] = (
+    df_mkt["molecule_adj_clean"] + " | " + df_mkt["frm2_clean"]
 )
-# =========================
-# MERGE 2 → INN-BRAND
-# =========================
-df_merged = df_merged.merge(
-    df_inn[
-        ["product_key", "business_rule"]
-    ],
-    on="product_key",
-    how="left"
+
+df_mkt["market_name"] = (
+    df_mkt["molecule_adj_name"].astype(str).str.strip() + " | " +
+    df_mkt["frm2"].astype(str).str.strip()
 )
-# =========================
-# CONTROLLO MATCH
-# =========================
-print("\n=== CHECK MERGE ===")
-print("Missing competitor:", df_merged["competitor"].isna().sum())
-print("Missing business_rule:", df_merged["business_rule"].isna().sum())
+
+# =====================================
+# 2. IDENTIFICA COLONNE MENSILI
+# =====================================
+eur_cols = [
+    c for c in df_mkt.columns
+    if c.startswith("sellin_eur_") and re.fullmatch(r"sellin_eur_\d{4}-\d{2}", c)
+]
+
+units_cols = [
+    c for c in df_mkt.columns
+    if c.startswith("sellin_units_") and re.fullmatch(r"sellin_units_\d{4}-\d{2}", c)
+]
+
+company_col = "manufacturer"
+product_col = "Product"
+
+# =====================================
+# 3. MARKET SHARE MENSILE
+# - prodotto
+# - azienda
+# =====================================
+for col in eur_cols:
+    suffix = col.replace("sellin_eur_", "")
+
+    market_total_col = f"market_total_eur_{suffix}"
+    product_share_col = f"product_market_share_eur_{suffix}"
+    company_sales_col = f"company_sales_eur_{suffix}"
+    company_share_col = f"company_market_share_eur_{suffix}"
+
+    # totale mercato
+    df_mkt[market_total_col] = df_mkt.groupby("market_id")[col].transform("sum")
+
+    # share prodotto
+    df_mkt[product_share_col] = (
+        df_mkt[col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+    # vendite azienda nel mercato
+    df_mkt[company_sales_col] = df_mkt.groupby(["market_id", company_col])[col].transform("sum")
+
+    # share azienda
+    df_mkt[company_share_col] = (
+        df_mkt[company_sales_col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+for col in units_cols:
+    suffix = col.replace("sellin_units_", "")
+
+    market_total_col = f"market_total_units_{suffix}"
+    product_share_col = f"product_market_share_units_{suffix}"
+    company_sales_col = f"company_sales_units_{suffix}"
+    company_share_col = f"company_market_share_units_{suffix}"
+
+    # totale mercato
+    df_mkt[market_total_col] = df_mkt.groupby("market_id")[col].transform("sum")
+
+    # share prodotto
+    df_mkt[product_share_col] = (
+        df_mkt[col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+    # vendite azienda nel mercato
+    df_mkt[company_sales_col] = df_mkt.groupby(["market_id", company_col])[col].transform("sum")
+
+    # share azienda
+    df_mkt[company_share_col] = (
+        df_mkt[company_sales_col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+# converte in percentuale
+monthly_share_cols = [
+    c for c in df_mkt.columns
+    if re.fullmatch(r"(product|company)_market_share_(eur|units)_\d{4}-\d{2}", c)
+]
+
+for c in monthly_share_cols:
+    df_mkt[c] = (df_mkt[c] * 100).round(2)
+
+# =====================================
+# 4. CREA TOTALI ANNUALI PER RIGA
+# =====================================
+eur_by_year = {}
+for c in eur_cols:
+    year = c.replace("sellin_eur_", "")[:4]
+    eur_by_year.setdefault(year, []).append(c)
+
+units_by_year = {}
+for c in units_cols:
+    year = c.replace("sellin_units_", "")[:4]
+    units_by_year.setdefault(year, []).append(c)
+
+for year, cols in eur_by_year.items():
+    df_mkt[f"sellin_eur_{year}"] = df_mkt[cols].sum(axis=1)
+
+for year, cols in units_by_year.items():
+    df_mkt[f"sellin_units_{year}"] = df_mkt[cols].sum(axis=1)
+
+# =====================================
+# 5. MARKET SHARE ANNUALE
+# - prodotto
+# - azienda
+# =====================================
+annual_eur_cols = [
+    c for c in df_mkt.columns
+    if re.fullmatch(r"sellin_eur_\d{4}", c)
+]
+
+annual_units_cols = [
+    c for c in df_mkt.columns
+    if re.fullmatch(r"sellin_units_\d{4}", c)
+]
+
+for col in annual_eur_cols:
+    suffix = col.replace("sellin_eur_", "")
+
+    market_total_col = f"market_total_eur_{suffix}"
+    product_share_col = f"product_market_share_eur_{suffix}"
+    company_sales_col = f"company_sales_eur_{suffix}"
+    company_share_col = f"company_market_share_eur_{suffix}"
+
+    # totale mercato
+    df_mkt[market_total_col] = df_mkt.groupby("market_id")[col].transform("sum")
+
+    # share prodotto
+    df_mkt[product_share_col] = (
+        df_mkt[col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+    # vendite azienda nel mercato
+    df_mkt[company_sales_col] = df_mkt.groupby(["market_id", company_col])[col].transform("sum")
+
+    # share azienda
+    df_mkt[company_share_col] = (
+        df_mkt[company_sales_col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+for col in annual_units_cols:
+    suffix = col.replace("sellin_units_", "")
+
+    market_total_col = f"market_total_units_{suffix}"
+    product_share_col = f"product_market_share_units_{suffix}"
+    company_sales_col = f"company_sales_units_{suffix}"
+    company_share_col = f"company_market_share_units_{suffix}"
+
+    # totale mercato
+    df_mkt[market_total_col] = df_mkt.groupby("market_id")[col].transform("sum")
+
+    # share prodotto
+    df_mkt[product_share_col] = (
+        df_mkt[col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+    # vendite azienda nel mercato
+    df_mkt[company_sales_col] = df_mkt.groupby(["market_id", company_col])[col].transform("sum")
+
+    # share azienda
+    df_mkt[company_share_col] = (
+        df_mkt[company_sales_col] / df_mkt[market_total_col]
+    ).replace([float("inf"), -float("inf")], pd.NA)
+
+# converte in percentuale
+annual_share_cols = [
+    c for c in df_mkt.columns
+    if re.fullmatch(r"(product|company)_market_share_(eur|units)_\d{4}", c)
+]
+
+for c in annual_share_cols:
+    df_mkt[c] = (df_mkt[c] * 100).round(2)
+
+# =====================================
+# 6. INFORMAZIONI UTILI SUL MERCATO
+# =====================================
+df_mkt["n_products_in_market"] = df_mkt.groupby("market_id")[product_col].transform("nunique")
+df_mkt["n_companies_in_market"] = df_mkt.groupby("market_id")[company_col].transform("nunique")
+
+# ranking prodotto nel mercato sull'ultimo mese disponibile in EUR
+if eur_cols:
+    latest_eur_col = sorted(eur_cols)[-1]
+    latest_suffix = latest_eur_col.replace("sellin_eur_", "")
+
+    df_mkt[f"product_rank_in_market_eur_{latest_suffix}"] = (
+        df_mkt.groupby("market_id")[latest_eur_col]
+        .rank(method="dense", ascending=False)
+    )
+
+# ranking azienda nel mercato sull'ultimo mese disponibile in EUR
+if eur_cols:
+    latest_eur_col = sorted(eur_cols)[-1]
+    latest_suffix = latest_eur_col.replace("sellin_eur_", "")
+
+    tmp_company_rank = (
+        df_mkt.groupby(["market_id", company_col])[latest_eur_col]
+        .sum()
+        .reset_index()
+    )
+
+    tmp_company_rank[f"company_rank_in_market_eur_{latest_suffix}"] = (
+        tmp_company_rank.groupby("market_id")[latest_eur_col]
+        .rank(method="dense", ascending=False)
+    )
+
+    df_mkt = df_mkt.merge(
+        tmp_company_rank[
+            ["market_id", company_col, f"company_rank_in_market_eur_{latest_suffix}"]
+        ],
+        on=["market_id", company_col],
+        how="left"
+    )
+
+# =====================================
+# 7. ORDINE COLONNE PIÙ LEGGIBILE
+# =====================================
+priority_cols = [
+    "market_id",
+    "market_name",
+    "n_products_in_market",
+    "n_companies_in_market"
+]
+
+remaining_cols = [c for c in df_mkt.columns if c not in priority_cols]
+
+if "molecule_adj_name" in remaining_cols:
+    pos = remaining_cols.index("molecule_adj_name") + 1
+    final_cols = remaining_cols[:pos] + priority_cols + remaining_cols[pos:]
+else:
+    final_cols = priority_cols + remaining_cols
+
+df_mkt = df_mkt[final_cols]
+
+# =====================================
+# 8. CHECK RAPIDI
+# =====================================
+print("Numero mercati:", df_mkt["market_id"].nunique())
 
 
+# =====================================
+# CREA DATASET LIGHT
+# =====================================
+base_cols = [
+    "atc4",
+    "molecule_adj_name",
+    "top_20_rank",
+    "Product",
+    "pack_raw",
+    "manufacturer",
+    "reimbursement_class",
+    "product_launch_date",
+    "pack_launch_date",
+    "frm2",
+    "business_rule"
+]
 
-# =========================
-# OUTPUT FINALE
-# =========================
-df_merged.to_excel("final_dataset_FULL.xlsx", index=False)
+base_cols = [c for c in base_cols if c in df_mkt.columns]
 
-print("\n✅ MERGE COMPLETATO!")
+share_cols = [c for c in df_mkt.columns if "market_share" in c]
 
+df_light = df_mkt[base_cols + share_cols].copy()
+
+df_light = df_light.sort_values(
+    [c for c in ["molecule_adj_name", "frm2", "manufacturer", "Product"] if c in df_light.columns]
+)
+
+
+from openpyxl import load_workbook
+
+output_file = "c:/Thesis/final_dataset_markets.xlsx"
+
+# scrittura
+with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+    df_mkt.to_excel(writer, sheet_name="FULL", index=False)
+    df_light.to_excel(writer, sheet_name="LIGHT", index=False)
+
+# formatting LIGHT
+wb = load_workbook(output_file)
+ws = wb["LIGHT"]
+
+# freeze (più pulito per analisi)
+ws.freeze_panes = "D2"
+
+# filtro
+ws.auto_filter.ref = ws.dimensions
+
+# larghezza colonne
+for col in ws.columns:
+    col_letter = col[0].column_letter
+    max_length = max(
+        [len(str(cell.value)) for cell in col if cell.value is not None] or [0]
+    )
+    ws.column_dimensions[col_letter].width = min(max_length + 2, 35)
+
+wb.save(output_file)
+
+print("✅ FILE CON DUE SHEET CREATO!")
