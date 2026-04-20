@@ -11,8 +11,7 @@ Brand                 0.013578  4.247272
 INN                   0.005931  3.568751
 
 === MODEL RESULTS PRAZOLI ===
-C:\Users\GOMEZME1\OneDrive - Sandoz\Desktop\Portfolio project\.venv\Lib\site-packages\statsmodels\regression\linear_model.py:1966: RuntimeWarning: divide by zero encountered in scalar divide
-  return np.sqrt(eigvals[0]/eigvals[-1])
+
                             OLS Regression Results                            
 ==============================================================================
 Dep. Variable:              log_share   R-squared:                       0.082
