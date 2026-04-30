@@ -1,127 +1,280 @@
-                             ATC4                           market_id     manufacturer  Product business_rule                 Pack    protection  ... log_price  market_size  log_market_size       HHI  lag_sales  is_brand  is_protected
-0  A02B2 INIBITORI POMPA PROTONIC  esomeprazolo | ss sistemici solidi  aurora biofarma  abigerd         brand  compr gastr 20mg 14  mai protetto  ...  1.144223   8558869.96        15.962479  0.117538        NaN         1             1
-1  A02B2 INIBITORI POMPA PROTONIC  esomeprazolo | ss sistemici solidi  aurora biofarma  abigerd         brand  compr gastr 20mg 28  mai protetto  ...  1.501853   8558869.96        15.962479  0.117538     869.78         1             1
-2  A02B2 INIBITORI POMPA PROTONIC  esomeprazolo | ss sistemici solidi  aurora biofarma  abigerd         brand  compr gastr 40mg 14  mai protetto  ...  1.403643   8558869.96        15.962479  0.117538    7336.66         1             1
-3  A02B2 INIBITORI POMPA PROTONIC  esomeprazolo | ss sistemici solidi  aurora biofarma  abigerd         brand  compr gastr 40mg 28  mai protetto  ...  1.761300   8558869.96        15.962479  0.117538     850.63         1             1
-4  A02B2 INIBITORI POMPA PROTONIC  esomeprazolo | ss sistemici solidi  aurora biofarma  abigerd         brand  compr gastr 20mg 14  mai protetto  ...  1.144223   7672834.02        15.853197  0.111128    5884.02         1             1
+mport pandas as pd
+import re
+from rapidfuzz import fuzz
 
-[5 rows x 20 columns]
-['ATC4', 'market_id', 'manufacturer', 'Product', 'business_rule', 'Pack', 'protection', 'month', 'product_share', 'eur', 'units', 'price', 'log_share', 'log_price', 'market_size', 'log_market_size', 'HHI', 'lag_sales', 'is_brand', 'is_protected']
-                    units  price  market_size       HHI  is_brand  log_units  log_price  log_market_size  lag_units  log_lag_units
-Product month                                                                                                                     
-abigerd 2022-09-01   1634   4.49   8558869.96  0.117538         1   7.398786   1.501853        15.962479      277.0       5.624018
-        2022-09-01    209   4.07   8558869.96  0.117538         1   5.342334   1.403643        15.962479     1634.0       7.398786
-        2022-09-01   1011   5.82   8558869.96  0.117538         1   6.918695   1.761300        15.962479      209.0       5.342334
-        2022-10-01    269   3.14   7672834.02  0.111128         1   5.594711   1.144223        15.853197     1011.0       6.918695
-        2022-10-01   1314   4.49   7672834.02  0.111128         1   7.180831   1.501853        15.853197      269.0       5.594711
-['Product', 'month']
+# =========================
+# LOAD
+# =========================
+df_old = pd.read_excel("c:/Thesis/Ex-factory & UN sales per month_Melany.xlsx")
+df_new = pd.read_excel("C:/Thesis/MKT_RETAIL 2024-2025 MTH.xlsx")  
 
-================ FIXED EFFECTS - SOLO PRODOTTO ================
+# =========================
+# CLEAN BASE
+# =========================
+def clean_df(df):
 
-                          PanelOLS Estimation Summary                           
-================================================================================
-Dep. Variable:              log_units   R-squared:                        0.1091
-Estimator:                   PanelOLS   R-squared (Between):             -1.7579
-No. Observations:               49759   R-squared (Within):               0.1091
-Date:                Wed, Apr 22 2026   R-squared (Overall):             -1.0652
-Time:                        17:06:31   Log-likelihood                -8.693e+04
-Cov. Estimator:             Clustered                                           
-                                        F-statistic:                      1517.7
-Entities:                         186   P-value                           0.0000
-Avg Obs:                       267.52   Distribution:                 F(4,49569)
-Min Obs:                       1.0000                                           
-Max Obs:                       972.00   F-statistic (robust):             27.664
-                                        P-value                           0.0000
-Time periods:                     108   Distribution:                 F(4,49569)
-Avg Obs:                       460.73                                           
-Min Obs:                       161.00                                           
-Max Obs:                       530.00                                           
-                                                                                
-                                Parameter Estimates                                
-===================================================================================
-                 Parameter  Std. Err.     T-stat    P-value    Lower CI    Upper CI
------------------------------------------------------------------------------------
-log_price           0.9964     0.1165     8.5562     0.0000      0.7681      1.2246
-log_market_size     1.0972     0.1895     5.7901     0.0000      0.7258      1.4686
-HHI                -1.7508     1.2900    -1.3573     0.1747     -4.2791      0.7775
-log_lag_units       0.1604     0.0340     4.7187     0.0000      0.0938      0.2271
-===================================================================================
+    df.columns = (
+        df.columns
+        .str.replace("\n", " ", regex=False)
+        .str.strip()
+        .str.lower()
+    )
+    print(df.columns)
+    rename_dict = {}
+    cols_to_drop = []
+    for col in df.columns:
+        if "single/combined molecule old" in col:
+            cols_to_drop.append(col)
+        elif "single" in col and "molecule" in col and "old" not in col :
+            rename_dict[col] = "single_combined_molecule"
+        elif "product launch" in col:
+            rename_dict[col] = "product_launch_date"
+        elif "pack launch" in col:
+            rename_dict[col] = "pack_launch_date"
+        elif "frm2" in col:
+            rename_dict[col] = "frm2"
+        elif "nfc123" in col:
+            rename_dict[col] = "nfc123"
+        elif col == "cls" or "rimborso" in col:
+            rename_dict[col] = "reimbursement_class"
 
-F-test for Poolability: 141.88
-P-value: 0.0000
-Distribution: F(185,49569)
+    df = df.rename(columns=rename_dict)
+    df = df.drop(columns= cols_to_drop, errors= "ignore")
+    print(df.columns.tolist())
 
-Included effects: Entity
+    if "reimbursement_class" not in df.columns:
+        df["reimbursement_class"] = None   
 
-================ FIXED EFFECTS - PRODOTTO + TEMPO ================
+    df["reimbursement_class"] = (
+        df["reimbursement_class"]
+        .astype(str)
+        .str.replace("*", "", regex=False)
+        .str.strip()
+        .str.lower()
+    )
 
-                          PanelOLS Estimation Summary                           
-================================================================================
-Dep. Variable:              log_units   R-squared:                        0.0684
-Estimator:                   PanelOLS   R-squared (Between):              0.3874
-No. Observations:               49759   R-squared (Within):               0.0863
-Date:                Wed, Apr 22 2026   R-squared (Overall):              0.5941
-Time:                        17:06:32   Log-likelihood                -8.427e+04
-Cov. Estimator:             Clustered                                           
-                                        F-statistic:                      908.30
-Entities:                         186   P-value                           0.0000
-Avg Obs:                       267.52   Distribution:                 F(4,49462)
-Min Obs:                       1.0000                                           
-Max Obs:                       972.00   F-statistic (robust):             176.61
-                                        P-value                           0.0000
-Time periods:                     108   Distribution:                 F(4,49462)
-Avg Obs:                       460.73                                           
-Min Obs:                       161.00                                           
-Max Obs:                       530.00                                           
-                                                                                
-                                Parameter Estimates                                
-===================================================================================
-                 Parameter  Std. Err.     T-stat    P-value    Lower CI    Upper CI
------------------------------------------------------------------------------------
-log_price           1.0339     0.1118     9.2454     0.0000      0.8147      1.2531
-log_market_size     0.7103     0.1698     4.1825     0.0000      0.3774      1.0432
-HHI                -1.2896     1.3790    -0.9352     0.3497     -3.9924      1.4132
-log_lag_units       0.0440     0.0333     1.3187     0.1873     -0.0214      0.1093
-===================================================================================
+    mapping = {
+        "farmaci automedic": "classe c",
+        "sop": "classe c",
+        "otc": "classe c",
+        "otc s/registraz": "classe c",
+        "farmaci sop": "classe c",
+        "farmaci s.p.": "classe c",
+        "limt px reg ussl-a": "classe a",
+        "a": "classe a",
+        "c": "classe c"
+    }  
 
-F-test for Poolability: 118.99
-P-value: 0.0000
-Distribution: F(292,49462)
+    df["reimbursement_class"] = df["reimbursement_class"].replace(mapping)
 
-Included effects: Entity, Time
+    def clean_text(x):
+        if pd.isna(x):
+            return None
+        return str(x).lower().strip()
 
-================ FIXED EFFECTS SEMPLICE ================
+    for col in ["product", "pack", "manufacturer"]:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_text)
 
-                          PanelOLS Estimation Summary                           
-================================================================================
-Dep. Variable:              log_units   R-squared:                        0.0665
-Estimator:                   PanelOLS   R-squared (Between):              0.4747
-No. Observations:               49759   R-squared (Within):               0.0735
-Date:                Wed, Apr 22 2026   R-squared (Overall):              0.6608
-Time:                        17:06:33   Log-likelihood                -8.432e+04
-Cov. Estimator:             Clustered                                           
-                                        F-statistic:                      1175.4
-Entities:                         186   P-value                           0.0000
-Avg Obs:                       267.52   Distribution:                 F(3,49463)
-Min Obs:                       1.0000                                           
-Max Obs:                       972.00   F-statistic (robust):             213.42
-                                        P-value                           0.0000
-Time periods:                     108   Distribution:                 F(3,49463)
-Avg Obs:                       460.73                                           
-Min Obs:                       161.00                                           
-Max Obs:                       530.00                                           
-                                                                                
-                                Parameter Estimates                                
-===================================================================================
-                 Parameter  Std. Err.     T-stat    P-value    Lower CI    Upper CI
------------------------------------------------------------------------------------
-log_price           1.0029     0.1069     9.3821     0.0000      0.7933      1.2124
-log_market_size     0.7005     0.1772     3.9529     0.0001      0.3532      1.0478
-HHI                -1.2270     1.4398    -0.8522     0.3941     -4.0491      1.5951
-===================================================================================
+    return df
 
-F-test for Poolability: 346.56
-P-value: 0.0000
-Distribution: F(292,49463)
+df_old = clean_df(df_old)
+df_new = clean_df(df_new)
 
-Included effects: Entity, Time
+# =========================
+# PACK RAW
+# =========================
+df_old["pack_raw"] = df_old["pack"]
+df_new["pack_raw"] = df_new["pack"]
+
+# =========================
+# CLEAN MANUFACTURER
+# =========================
+def clean_manufacturer(x):
+    if pd.isna(x):
+        return None
+    x = str(x).lower().strip()
+    x = re.sub(r"\b(spa|srl|ltd|gmbh|inc|sa)\b", "", x)
+    x = re.sub(r"\s+", " ", x)
+    return x.strip()
+
+df_old["manufacturer"] = df_old["manufacturer"].apply(clean_manufacturer)
+df_new["manufacturer"] = df_new["manufacturer"].apply(clean_manufacturer)
+
+# =========================
+# CLEAN PACK
+# =========================
+def clean_pack(x):
+    if pd.isna(x):
+        return None
+    x = str(x).lower()
+    x = re.sub(r"[.,]", "", x)
+    x = re.sub(r"\b(compr|cpr|compresse|riv\w*)\b", "cpr", x)
+    x = re.sub(r"\b(capsule|caps)\b", "caps", x)
+    x = re.sub(r"[x×]", "x", x)
+    x = re.sub(r"\s+", " ", x)
+    return x.strip()
+
+df_old["pack"] = df_old["pack"].apply(clean_pack)
+df_new["pack"] = df_new["pack"].apply(clean_pack)
+
+# =========================
+# df_new → LONG → PIVOT
+# =========================
+year_cols = [col for col in df_new.columns if re.search(r"\d{1,2}/\d{4}", str(col))]
+
+df_long = df_new.melt(
+    id_vars=[
+        "atc4","product","pack","pack_raw","manufacturer",
+        "reimbursement_class","metric",
+        "single_combined_molecule",
+        "protection"
+    ],
+    value_vars=year_cols,
+    var_name="date",
+    value_name="value"
+)
+
+df_long = df_long[df_long["metric"].str.contains("sell", case=False, na=False)]
+df_long = df_long[~df_long["metric"].str.contains("usd", case=False, na=False)]
+
+df_long["metric_type"] = df_long["metric"].str.lower().apply(
+    lambda x: "units" if re.search(r"\bun\b", x)
+    else ("eur" if re.search(r"\beur\b", x) else None)
+)
+
+df_long = df_long[df_long["metric_type"].notna()]
+
+df_long["date"] = pd.to_datetime(df_long["date"], format="%m/%Y", errors="coerce")
+df_long["year_month"] = df_long["date"].dt.to_period("M")
+
+df_long["new_col"] = "sellin_" + df_long["metric_type"] + "_" + df_long["year_month"].astype(str)
+
+df_new_clean = df_long.pivot_table(
+    index=[
+        "atc4","product","pack_raw","manufacturer",
+        "reimbursement_class","single_combined_molecule",
+        "protection"
+    ],
+    columns="new_col",
+    values="value",
+    aggfunc="sum"
+).reset_index()
+
+# =========================
+# df_old → rename colonne
+# =========================
+new_cols_old = {}
+
+for col in df_old.columns:
+    c = col.lower()
+    date_match = re.search(r"(\d{1,2}/\d{4})", c)
+
+    if date_match:
+        date = pd.to_datetime(date_match.group(1), format="%m/%Y")
+        ym = date.to_period("M")
+
+        if "sell-in" in c and "eur" not in c:
+            new_cols_old[col] = f"sellin_units_{ym}"
+        elif "eur" in c:
+            new_cols_old[col] = f"sellin_eur_{ym}"
+
+df_old = df_old.rename(columns=new_cols_old)
+
+# =========================
+# CREATE KEY
+# =========================
+def create_key(df):
+    return (
+        df["product"].fillna("") + "_" +
+        df["pack_raw"].fillna("") + "_" +
+        df["manufacturer"].fillna("") + "_" +
+        df["reimbursement_class"].fillna("")
+    )
+
+df_old["key"] = create_key(df_old)
+df_new_clean["key"] = create_key(df_new_clean)
+
+
+# =========================
+# MERGE
+# =========================
+df2 = df_old.merge(
+    df_new_clean,
+    on="key",
+    how="outer",
+    suffixes=("_old","_new")
+)
+
+# =========================
+# RICOSTRUZIONE COLONNE
+# =========================
+df2["atc4"] = df2.get("atc4_old").combine_first(df2.get("atc4_new"))
+df2["product"] = df2.get("product_old").combine_first(df2.get("product_new"))
+df2["pack_raw"] = df2.get("pack_raw_old").combine_first(df2.get("pack_raw_new"))
+df2["manufacturer"] = df2.get("manufacturer_old").combine_first(df2.get("manufacturer_new"))
+df2["reimbursement_class"] = df2.get("reimbursement_class_old").combine_first(df2.get("reimbursement_class_new"))
+df2["single_combined_molecule"] = df2.get("single_combined_molecule_old").combine_first(df2.get("single_combined_molecule_new"))
+
+# =========================
+# PRICE CALCULATION
+# =========================
+units_cols = [c for c in df2.columns if c.startswith("sellin_units_")]
+eur_cols   = [c for c in df2.columns if c.startswith("sellin_eur_")]
+
+def extract_date(col):
+    match = re.search(r"(\d{4}-\d{2})", col)
+    return match.group(1) if match else ""
+
+price_cols = []
+
+for u_col in units_cols:
+    month = u_col.replace("sellin_units_", "")
+    e_col = f"sellin_eur_{month}"
+
+    if e_col in df2.columns:
+        p_col = f"price_{month}"
+        df2[p_col] = df2[e_col] / df2[u_col]
+        df2[p_col] = df2[p_col].replace([float("inf"), -float("inf")], None)
+        df2[p_col] = df2[p_col].round(2)
+        price_cols.append(p_col)
+
+# =========================
+# ORDER COLUMNS
+# =========================
+months = sorted(set([extract_date(c) for c in units_cols]))
+
+ordered_cols = []
+for m in months:
+    u = f"sellin_units_{m}"
+    e = f"sellin_eur_{m}"
+    p = f"price_{m}"
+
+    if u in df2.columns:
+        ordered_cols.append(u)
+    if e in df2.columns:
+        ordered_cols.append(e)
+    if p in df2.columns:
+        ordered_cols.append(p)
+# -------------------------
+#  ATTESO VS OTTENUTO
+# -------------------------
+key_cols = ["product","pack_raw","manufacturer","reimbursement_class"]
+old_keys = set(df_old[key_cols].drop_duplicates().apply(tuple, axis=1))
+new_keys = set(df_new_clean[key_cols].drop_duplicates().apply(tuple, axis=1))
+final_keys = set(df2[key_cols].drop_duplicates().apply(tuple, axis=1))
+
+n_old = df_old[key_cols].drop_duplicates().shape[0]
+n_new = df_new_clean[key_cols].drop_duplicates().shape[0]
+n_final = df2[key_cols].drop_duplicates().shape[0]
+expected_total = len(old_keys | new_keys)
+
+
+print("\n=== CONTROLLO FINALE ===")
+print(f"Attesi (union): {expected_total}")
+print(f"Finale:         {n_final}")
+
+if n_final == expected_total:
+    print("DATASET COMPLETO (nessuna perdita)")
+else:
+    print(" ATTENZIONE: mancano prodotti")
